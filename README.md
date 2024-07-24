@@ -1139,7 +1139,7 @@ Step-by-Step Instructions to Complete the Game:
 
 By following these steps, you'll have a complete, functioning Pong game that adheres to the feature-based architecture. This structure allows for easy expansion, such as adding power-ups, different AI difficulties, or even networked multiplayer in the future.
 
-Remember to create appropriate scenes in Godot, connecting the script instances and setting up th
+Remember to create appropriate scenes in Godot, connecting the script instances and setting up the node hierarchy to match the structure outlined in these steps.
 
 ### Pong Architecture Diagram
 
