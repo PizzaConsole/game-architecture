@@ -103,6 +103,281 @@ Global components include:
 - Composition over Inheritance: Use composition to build complex behaviors
 - Fail Fast: Detect and report errors as early as possible
 
+## 7. Best Practices (Expanded)
+
+### 7.1 Single Responsibility Principle (SRP)
+
+- Each class should have one primary responsibility
+- Example: Separate player movement logic from player health management
+
+```gdscript
+# Good: Separate classes for movement and health
+class PlayerMovement:
+    func move(direction: Vector2) -> void:
+        # Movement logic here
+
+class PlayerHealth:
+    func take_damage(amount: int) -> void:
+        # Health management logic here
+
+# Bad: Mixing responsibilities
+class Player:
+    func move(direction: Vector2) -> void:
+        # Movement logic here
+
+    func take_damage(amount: int) -> void:
+        # Health management logic here
+```
+
+### 7.2 Dependency Inversion Principle
+
+- Depend on abstractions, not concretions
+- Use interfaces or abstract classes to define contracts
+
+```gdscript
+# Good: Depending on an interface
+class_name WeaponInterface
+extends Node
+
+func attack() -> void:
+    pass
+
+class Sword extends WeaponInterface:
+    func attack() -> void:
+        print("Sword attack!")
+
+class Bow extends WeaponInterface:
+    func attack() -> void:
+        print("Bow attack!")
+
+class Player:
+    var weapon: WeaponInterface
+
+    func set_weapon(new_weapon: WeaponInterface) -> void:
+        weapon = new_weapon
+
+    func attack() -> void:
+        weapon.attack()
+
+# Usage
+var player = Player.new()
+player.set_weapon(Sword.new())
+player.attack()  # Outputs: Sword attack!
+player.set_weapon(Bow.new())
+player.attack()  # Outputs: Bow attack!
+```
+
+### 7.3 Open/Closed Principle
+
+- Open for extension, closed for modification
+- Use inheritance or composition to add new functionality
+
+```gdscript
+# Good: Using inheritance for extensibility
+class Enemy:
+    func take_damage(amount: int) -> void:
+        print("Enemy took ", amount, " damage")
+
+class BossEnemy extends Enemy:
+    func take_damage(amount: int) -> void:
+        super.take_damage(amount / 2)  # Bosses take half damage
+        print("Boss unleashes special attack!")
+
+# Usage
+var enemy = Enemy.new()
+enemy.take_damage(10)  # Outputs: Enemy took 10 damage
+
+var boss = BossEnemy.new()
+boss.take_damage(10)  # Outputs: Enemy took 5 damage \n Boss unleashes special attack!
+```
+
+### 7.4 Don't Repeat Yourself (DRY)
+
+- Avoid code duplication
+- Extract common functionality into reusable functions or classes
+- Be cautious of over-application in a feature-based architecture
+
+```gdscript
+# Bad: Repeating code
+func process_player_input():
+    if Input.is_action_pressed("move_right"):
+        player.position.x += player.speed * delta
+    if Input.is_action_pressed("move_left"):
+        player.position.x -= player.speed * delta
+    if Input.is_action_pressed("move_up"):
+        player.position.y -= player.speed * delta
+    if Input.is_action_pressed("move_down"):
+        player.position.y += player.speed * delta
+
+# Good: Extracting common functionality
+func process_player_input():
+    var movement = Vector2.ZERO
+    movement.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
+    movement.y = Input.get_action_strength("move_down") - Input.get_action_strength("move_up")
+    player.position += movement.normalized() * player.speed * delta
+```
+
+#### Note on DRY in Feature-Based Architecture:
+
+While DRY is a valuable principle, it's important to apply it judiciously in a feature-based system. It's acceptable and often beneficial to have similar code between features. This approach can enhance the isolation and independence of features, making them easier to update or modify without risking unintended effects on other parts of the system.
+
+For example, if two features have similar but not identical functionality:
+
+```gdscript
+# Feature A
+func process_enemy_movement_feature_a(enemy):
+    enemy.position += enemy.direction * enemy.speed * delta
+    if enemy.position.x > screen_width:
+        enemy.direction.x *= -1
+
+# Feature B
+func process_enemy_movement_feature_b(enemy):
+    enemy.position += enemy.direction * enemy.speed * delta
+    if enemy.position.x < 0 or enemy.position.x > screen_width:
+        enemy.direction.x *= -1
+```
+
+In this case, while the functions are similar, keeping them separate allows each feature to evolve independently. If Feature A needs to change its boundary condition later, it can do so without affecting Feature B.
+
+The key is to balance the DRY principle with the need for feature isolation. Apply DRY within features, but be cautious about applying it across feature boundaries unless the shared functionality is truly universal and unlikely to diverge.
+
+### 7.5 KISS (Keep It Simple, Stupid)
+
+- Favor simple solutions over complex ones
+- Break down complex problems into smaller, manageable parts
+
+```gdscript
+# Bad: Overly complex inventory system
+class Inventory:
+    var items = []
+    var weights = []
+    var values = []
+
+    func add_item(item, weight, value):
+        items.append(item)
+        weights.append(weight)
+        values.append(value)
+
+    func remove_item(index):
+        items.pop_at(index)
+        weights.pop_at(index)
+        values.pop_at(index)
+
+# Good: Simplified inventory system
+class Item:
+    var name: String
+    var weight: float
+    var value: int
+
+    func _init(p_name: String, p_weight: float, p_value: int):
+        name = p_name
+        weight = p_weight
+        value = p_value
+
+class Inventory:
+    var items = []
+
+    func add_item(item: Item):
+        items.append(item)
+
+    func remove_item(index: int):
+        items.pop_at(index)
+```
+
+### 7.6 Composition over Inheritance
+
+- Use composition to build complex behaviors
+- Favor object composition over class inheritance when possible
+
+```gdscript
+# Bad: Using inheritance for different enemy types
+class Enemy:
+    func attack():
+        pass
+
+class FlyingEnemy extends Enemy:
+    func fly():
+        pass
+
+class SwimmingEnemy extends Enemy:
+    func swim():
+        pass
+
+# Good: Using composition for flexible enemy behaviors
+class Enemy:
+    var movement_behavior
+    var attack_behavior
+
+    func perform_movement():
+        movement_behavior.move()
+
+    func perform_attack():
+        attack_behavior.attack()
+
+class FlyingMovement:
+    func move():
+        print("Flying through the air")
+
+class SwimmingMovement:
+    func move():
+        print("Swimming in water")
+
+class MeleeAttack:
+    func attack():
+        print("Performing melee attack")
+
+class RangedAttack:
+    func attack():
+        print("Performing ranged attack")
+
+# Usage
+var flying_melee_enemy = Enemy.new()
+flying_melee_enemy.movement_behavior = FlyingMovement.new()
+flying_melee_enemy.attack_behavior = MeleeAttack.new()
+
+var swimming_ranged_enemy = Enemy.new()
+swimming_ranged_enemy.movement_behavior = SwimmingMovement.new()
+swimming_ranged_enemy.attack_behavior = RangedAttack.new()
+```
+
+### 7.7 Fail Fast
+
+- Detect and report errors as early as possible
+- Use assertions and error checking to catch issues early in development
+
+```gdscript
+func divide(a: int, b: int) -> float:
+    # Good: Checking for division by zero early
+    assert(b != 0, "Cannot divide by zero")
+    return a as float / b
+
+func process_user_input(input: String) -> void:
+    # Good: Validating input early
+    if input.empty():
+        printerr("User input cannot be empty")
+        return
+
+    # Process valid input...
+
+```
+
+### 7.8 Use Constants for Magic Values
+
+- Avoid hardcoding values directly in the code
+- Use constants to improve readability and maintainability
+
+```gdscript
+# Bad: Using magic numbers
+func calculate_damage(base_damage: int) -> int:
+    return base_damage * 1.5 if is_critical_hit else base_damage
+
+# Good: Using constants
+const CRITICAL_HIT_MULTIPLIER = 1.5
+
+func calculate_damage(base_damage: int) -> int:
+    return base_damage * CRITICAL_HIT_MULTIPLIER if is_critical_hit else base_damage
+```
+
 ## 8. Scalability and Extensibility
 
 - Design features as self-contained modules
