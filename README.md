@@ -29,6 +29,297 @@ This document outlines a feature-based architecture designed for complex game de
 - Testability: Ensure all components can be easily unit tested.
 - Flexibility: Allow for different implementation strategies within the same architectural framework.
 
+## 2. Core Principles (Expanded)
+
+### 2.1 Feature-Centric Organization
+
+- Structure code, scenes, and assets around game features rather than technical layers.
+- Each feature should be a self-contained module that represents a distinct aspect of the game, including all relevant scripts, scenes, and assets.
+
+Example structure:
+
+```
+/src
+    /features
+        /combat
+            /scripts
+                combat_controller.gd
+                combat_service.gd
+                combat_repository.gd
+                combat_data_store.gd
+            /scenes
+                combat_arena.tscn
+                weapon_selector.tscn
+            /assets
+                /textures
+                    sword_icon.png
+                    shield_icon.png
+                /audio
+                    sword_clash.wav
+        /inventory
+            /scripts
+                inventory_controller.gd
+                inventory_service.gd
+                inventory_repository.gd
+                inventory_data_store.gd
+            /scenes
+                inventory_ui.tscn
+                item_detail.tscn
+            /assets
+                /textures
+                    inventory_background.png
+                    item_icons/
+        /quest
+            /scripts
+                quest_controller.gd
+                quest_service.gd
+                quest_repository.gd
+                quest_data_store.gd
+            /scenes
+                quest_log.tscn
+                quest_marker.tscn
+            /assets
+                /textures
+                    quest_icons/
+                /audio
+                    quest_complete.wav
+    /core
+        /utils
+        /config
+        /global_services
+    /shared_assets
+        /fonts
+        /common_textures
+```
+
+Benefits:
+
+- Easier navigation and maintenance of the entire project, not just code
+- Clearer separation of concerns between different game systems
+- Facilitates parallel development by different team members
+- Keeps related assets and scenes close to the scripts that use them
+- Makes it easier to package or remove entire features if needed
+- Improves asset management and reduces the risk of unused assets
+
+Additional considerations:
+
+- Use a `shared_assets` folder for truly global assets used across multiple features
+- Consider using symbolic links or Godot's `ProjectSettings.globalize_path()` for shared assets to avoid duplication
+- Establish clear guidelines for when an asset belongs to a specific feature vs. the shared assets
+
+This organization method extends beyond just scripts to encompass the entire feature, including its UI elements (scenes) and graphical/audio resources (assets). This holistic approach to feature organization can significantly improve project maintainability and scalability.
+
+### 2.2 Modularity
+
+- Each feature should be self-contained with minimal dependencies on other features.
+- Use interfaces and dependency injection to manage necessary inter-feature communication.
+
+Example:
+
+```gdscript
+# Interface for inventory interaction
+class_name InventoryInterface
+extends Node
+
+func add_item(item: Item) -> bool:
+    pass
+
+func remove_item(item: Item) -> bool:
+    pass
+
+# Combat service using inventory interface
+class CombatService:
+    var inventory: InventoryInterface
+
+    func _init(p_inventory: InventoryInterface):
+        inventory = p_inventory
+
+    func use_health_potion():
+        var health_potion = Item.new("Health Potion")
+        if inventory.remove_item(health_potion):
+            player.heal(50)
+```
+
+Benefits:
+
+- Easier to test individual features in isolation
+- Simplifies adding or removing features
+- Reduces risk of changes in one feature affecting others
+
+### 2.3 Separation of Concerns
+
+- Clearly define responsibilities for each component within a feature.
+- Use a consistent structure across features (e.g., Controller, Service, Repository, DataStore).
+
+Example:
+
+```gdscript
+# Controller: Handles UI and input
+class InventoryController:
+    var inventory_service: InventoryService
+
+    func _on_use_item_button_pressed(item: Item):
+        inventory_service.use_item(item)
+
+# Service: Contains business logic
+class InventoryService:
+    var inventory_repository: InventoryRepository
+
+    func use_item(item: Item):
+        if inventory_repository.remove_item(item):
+            apply_item_effect(item)
+
+# Repository: Manages data access
+class InventoryRepository:
+    var data_store: InventoryDataStore
+
+    func remove_item(item: Item) -> bool:
+        return data_store.remove_item(item.id)
+
+# DataStore: Handles data persistence
+class InventoryDataStore:
+    func remove_item(item_id: String) -> bool:
+        # Implementation for removing item from persistent storage
+        pass
+```
+
+Benefits:
+
+- Improves code organization and readability
+- Facilitates unit testing of individual components
+- Makes it easier to modify or replace specific parts of a feature
+
+### 2.4 Scalability
+
+- Design for easy addition of new features and expansion of existing ones.
+- Use patterns like Strategy and Observer to allow for future extensibility.
+
+Example of extensible enemy behavior:
+
+```gdscript
+class_name EnemyBehavior
+extends Node
+
+func perform_action(enemy: Enemy):
+    pass
+
+class PatrolBehavior extends EnemyBehavior:
+    func perform_action(enemy: Enemy):
+        # Implement patrol logic
+
+class AggressiveBehavior extends EnemyBehavior:
+    func perform_action(enemy: Enemy):
+        # Implement aggressive attack logic
+
+class Enemy:
+    var behavior: EnemyBehavior
+
+    func set_behavior(new_behavior: EnemyBehavior):
+        behavior = new_behavior
+
+    func update():
+        behavior.perform_action(self)
+```
+
+Benefits:
+
+- Easier to add new types of enemies or behaviors
+- Allows for dynamic behavior changes during runtime
+- Simplifies balancing and tweaking of game mechanics
+
+### 2.5 Testability
+
+- Ensure all components can be easily unit tested.
+- Use dependency injection to facilitate mocking of dependencies.
+
+Example:
+
+```gdscript
+class_name PlayerService
+extends Node
+
+var health_repository: HealthRepository
+
+func _init(p_health_repository: HealthRepository):
+    health_repository = p_health_repository
+
+func take_damage(amount: int):
+    var current_health = health_repository.get_health()
+    var new_health = max(0, current_health - amount)
+    health_repository.set_health(new_health)
+    if new_health == 0:
+        emit_signal("player_died")
+
+# In a test file
+func test_player_dies_when_health_reaches_zero():
+    var mock_health_repo = MockHealthRepository.new()
+    mock_health_repo.set_health(100)
+
+    var player_service = PlayerService.new(mock_health_repo)
+    var death_signal_received = false
+    player_service.connect("player_died", self, "on_player_died")
+
+    player_service.take_damage(100)
+
+    assert(death_signal_received)
+    assert_eq(mock_health_repo.get_health(), 0)
+```
+
+Benefits:
+
+- Increases confidence in code correctness
+- Facilitates refactoring and feature additions
+- Serves as documentation for expected component behavior
+
+### 2.6 Flexibility
+
+- Allow for different implementation strategies within the same architectural framework.
+- Use interfaces and abstract classes to define contracts between components.
+
+Example:
+
+```gdscript
+class_name SaveSystem
+extends Node
+
+func save_game(data: Dictionary):
+    pass
+
+func load_game() -> Dictionary:
+    pass
+
+class FileSaveSystem extends SaveSystem:
+    func save_game(data: Dictionary):
+        # Implementation for file-based saving
+
+    func load_game() -> Dictionary:
+        # Implementation for file-based loading
+
+class CloudSaveSystem extends SaveSystem:
+    func save_game(data: Dictionary):
+        # Implementation for cloud-based saving
+
+    func load_game() -> Dictionary:
+        # Implementation for cloud-based loading
+
+# Usage
+var save_system: SaveSystem
+
+func _ready():
+    if OS.has_feature("mobile"):
+        save_system = CloudSaveSystem.new()
+    else:
+        save_system = FileSaveSystem.new()
+```
+
+Benefits:
+
+- Allows for platform-specific implementations
+- Facilitates A/B testing of different strategies
+- Makes it easier to swap out implementations as requirements change
+
+By adhering to these expanded core principles, developers can create a robust, maintainable, and scalable game architecture that can adapt to changing requirements and grow with the project's needs.
+
 ## 3. Architecture Overview
 
 The architecture is built around feature modules, each containing:
