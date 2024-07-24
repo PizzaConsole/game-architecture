@@ -679,6 +679,555 @@ This approach also facilitates collaborative development, as different team memb
 
 Remember that while this architecture provides a solid foundation, it should be adapted as necessary to meet the specific needs of your project. Always consider performance implications, especially for mobile or resource-constrained platforms, and be prepared to optimize where necessary.
 
+### 12.4 Pong Game System
+
+This example demonstrates how to implement a simple Pong game using our feature-based architecture. The game will include player controls, AI opponent, score tracking, and high score saving.
+
+#### PongDataStore
+
+```gdscript
+class_name PongDataStore
+extends Resource
+
+const SAVE_PATH = "user://data/pong_data.tres"
+const CURRENT_VERSION = 1
+
+@export var high_score: int = 0
+@export var version: int = CURRENT_VERSION
+
+static func load_or_create() -> PongDataStore:
+    if FileAccess.file_exists(SAVE_PATH):
+        var store: PongDataStore = ResourceLoader.load(SAVE_PATH) as PongDataStore
+        if store:
+            store._migrate_store_if_necessary()
+            return store
+
+    var new_store: PongDataStore = PongDataStore.new()
+    new_store.save()
+    return new_store
+
+func save() -> void:
+    ResourceSaver.save(self, SAVE_PATH)
+
+func _migrate_store_if_necessary() -> void:
+    if version < CURRENT_VERSION:
+        match version:
+            1:
+                _migrate_store_to_v2()
+
+        version = CURRENT_VERSION
+        save()
+
+func _migrate_store_to_v2() -> void:
+    # Example: Add a new property for total games played
+    # self.total_games_played = 0
+    print("Migrated PongDataStore to version 2")
+```
+
+#### PongRepository
+
+```gdscript
+class_name PongRepository
+extends Node
+
+var _data_store: PongDataStore
+var _high_score: int = 0
+var _player_score: int = 0
+var _ai_score: int = 0
+var _is_cache_valid: bool = false
+
+func _init(data_store: PongDataStore) -> void:
+    _data_store = data_store
+
+func load_high_score() -> void:
+    _high_score = _data_store.high_score
+    _is_cache_valid = true
+
+func get_high_score() -> int:
+    if not _is_cache_valid:
+        load_high_score()
+    return _high_score
+
+func update_high_score(score: int) -> void:
+    if score > _high_score:
+        _high_score = score
+        _data_store.high_score = score
+        _data_store.save()
+
+func get_player_score() -> int:
+    return _player_score
+
+func get_ai_score() -> int:
+    return _ai_score
+
+func update_player_score(score: int) -> void:
+    _player_score = score
+
+func update_ai_score(score: int) -> void:
+    _ai_score = score
+
+func reset_scores() -> void:
+    _player_score = 0
+    _ai_score = 0
+
+func persist() -> void:
+    _data_store.high_score = _high_score
+    _data_store.save()
+```
+
+#### PongService
+
+```gdscript
+class_name PongService
+extends Node
+
+signal score_updated(player_score: int, ai_score: int)
+signal game_over(final_score: int, is_high_score: bool)
+
+var pong_repository: PongRepository
+var audio_manager: AudioManager
+
+func _init(p_pong_repo: PongRepository, p_audio_manager: AudioManager) -> void:
+    pong_repository = p_pong_repo
+    audio_manager = p_audio_manager
+
+func start_new_game() -> void:
+    pong_repository.reset_scores()
+    score_updated.emit(pong_repository.get_player_score(), pong_repository.get_ai_score())
+
+func update_score(is_player_point: bool) -> void:
+    if is_player_point:
+        pong_repository.update_player_score(pong_repository.get_player_score() + 1)
+    else:
+        pong_repository.update_ai_score(pong_repository.get_ai_score() + 1)
+
+    audio_manager.play_score()
+    score_updated.emit(pong_repository.get_player_score(), pong_repository.get_ai_score())
+
+    if pong_repository.get_player_score() >= 11 or pong_repository.get_ai_score() >= 11:
+        end_game()
+
+func end_game() -> void:
+    var player_score = pong_repository.get_player_score()
+    var high_score = pong_repository.get_high_score()
+    var is_new_high_score = player_score > high_score
+    if is_new_high_score:
+        pong_repository.update_high_score(player_score)
+    game_over.emit(player_score, is_new_high_score)
+
+func get_high_score() -> int:
+    return pong_repository.get_high_score()
+
+func get_player_score() -> int:
+    return pong_repository.get_player_score()
+
+func get_ai_score() -> int:
+    return pong_repository.get_ai_score()
+
+
+func move_player_paddle(delta: float) -> void:
+    # Implement player paddle movement logic
+
+func update_ai_paddle(ball_position: Vector2, delta: float) -> void:
+    # Implement AI paddle movement logic
+
+func update_ball_position(delta: float) -> void:
+    # Implement ball movement and collision logic
+```
+
+#### PongController
+
+```gdscript
+extends Node2D
+
+@onready var player_paddle = $PlayerPaddle
+@onready var ai_paddle = $AIPaddle
+@onready var ball = $Ball
+@onready var score_label = $ScoreLabel
+@onready var high_score_label = $HighScoreLabel
+
+var pong_service: PongService
+
+func _init(p_pong_service: PongService):
+    pong_service = p_pong_service
+
+func _ready():
+    pong_service.connect("score_updated", self, "_on_score_updated")
+    pong_service.connect("game_over", self, "_on_game_over")
+    start_new_game()
+
+func _process(delta):
+    pong_service.move_player_paddle(delta)
+    pong_service.update_ai_paddle(ball.position, delta)
+    pong_service.update_ball_position(delta)
+
+func _on_score_updated(player_score: int, ai_score: int):
+    score_label.text = str(player_score) + " - " + str(ai_score)
+
+func _on_game_over(final_score: int, is_high_score: bool):
+    if is_high_score:
+        high_score_label.text = "New High Score: " + str(final_score)
+    # Show game over screen, option to restart, etc.
+
+func start_new_game():
+    pong_service.start_new_game()
+    high_score_label.text = "High Score: " + str(pong_service.get_high_score())
+    # Reset paddle and ball positions
+```
+
+This Pong game example demonstrates:
+
+1. Separation of Concerns:
+
+   - PongController handles the game's visual elements and user input.
+   - PongService contains the game logic, including score tracking and game state.
+   - PongRepository manages data access and persistence.
+   - PongDataStore handles saving and loading of high scores, with version control.
+
+2. Data Persistence: The high score is saved to disk and can be loaded when the game starts.
+
+3. Scalability: It's easy to add new features, such as different AI difficulties or power-ups, by extending the PongService.
+
+4. Testability: Each component (especially PongService) can be unit tested in isolation.
+
+5. Event-driven Architecture: The use of signals (score_updated, game_over) allows for loose coupling between the service and controller.
+
+6. Version Control for Data: The PongDataStore includes version tracking and migration methods, allowing for easy updates to saved data structure as the game evolves.
+
+This architecture allows for easy expansion of the game. For example, you could add:
+
+- Multiple AI difficulties by creating different AI strategy classes.
+- A replay system by recording and playing back paddle movements.
+- Online multiplayer by extending the PongService to handle network communication.
+
+By following these patterns, even a simple game like Pong can be structured in a way that's maintainable, extensible, and robust.
+
+### 12.4 Pong Game System (continued)
+
+#### Completing the Pong Game
+
+While our example provides the architectural foundation, several components are needed to create a fully functional Pong game. Here's what's missing and how to complete it:
+
+1. Game Objects
+
+   - Ball
+   - Player Paddle
+   - AI Paddle
+
+2. Game Logic
+
+   - Ball movement and collision detection
+   - AI paddle movement
+   - Score tracking and win conditions
+
+3. User Interface
+
+   - Start menu
+   - In-game UI (score display)
+   - Game over screen
+
+4. Sound Effects
+
+Step-by-Step Instructions to Complete the Game:
+
+1. Create Game Objects:
+
+   a. Ball:
+
+   ```gdscript
+   class_name Ball
+   extends Area2D
+
+   var speed: float = 400.0
+   var direction: Vector2 = Vector2.ZERO
+
+   func _ready():
+       randomize()
+       reset_ball()
+
+   func _process(delta):
+       position += direction * speed * delta
+
+   func reset_ball():
+       position = Vector2(512, 300)
+       direction = Vector2([-1, 1].pick_random(), randf_range(-0.8, 0.8)).normalized()
+   ```
+
+   b. Paddle (base class for both player and AI):
+
+   ```gdscript
+   class_name Paddle
+   extends Area2D
+
+   var speed: float = 400.0
+
+   func move_up(delta: float):
+       position.y = max(position.y - speed * delta, 0)
+
+   func move_down(delta: float):
+       position.y = min(position.y + speed * delta, 600)
+   ```
+
+2. Implement Game Logic in PongService:
+
+   a. Update ball position and handle collisions:
+
+   ```gdscript
+   func update_ball_position(delta: float, ball: Ball, player_paddle: Paddle, ai_paddle: Paddle) -> void:
+       ball.position += ball.direction * ball.speed * delta
+
+       if ball.position.y <= 0 or ball.position.y >= 600:
+           ball.direction.y *= -1
+
+       if ball.overlaps_body(player_paddle) or ball.overlaps_body(ai_paddle):
+           ball.direction.x *= -1
+           ball.speed += 20  # Increase difficulty
+
+       if ball.position.x <= 0:
+           update_score(false)
+           ball.reset_ball()
+       elif ball.position.x >= 1024:
+           update_score(true)
+           ball.reset_ball()
+   ```
+
+   b. Implement AI paddle movement:
+
+   ```gdscript
+   func update_ai_paddle(ball_position: Vector2, ai_paddle: Paddle, delta: float) -> void:
+       var paddle_center = ai_paddle.position.y + ai_paddle.height / 2
+       if ball_position.y < paddle_center - 10:
+           ai_paddle.move_up(delta)
+       elif ball_position.y > paddle_center + 10:
+           ai_paddle.move_down(delta)
+   ```
+
+3. Enhance PongController:
+
+   a. Add input handling for player paddle:
+
+   ```gdscript
+   func _process(delta):
+       if Input.is_action_pressed("move_up"):
+           player_paddle.move_up(delta)
+       if Input.is_action_pressed("move_down"):
+           player_paddle.move_down(delta)
+
+       pong_service.update_ai_paddle(ball.position, ai_paddle, delta)
+       pong_service.update_ball_position(delta, ball, player_paddle, ai_paddle)
+   ```
+
+   b. Implement game states (menu, playing, game over):
+
+   ```gdscript
+   enum GameState { MENU, PLAYING, GAME_OVER }
+   var current_state: GameState = GameState.MENU
+
+   func _ready():
+       set_state(GameState.MENU)
+
+   func set_state(new_state: GameState):
+       current_state = new_state
+       match current_state:
+           GameState.MENU:
+               show_menu()
+           GameState.PLAYING:
+               start_new_game()
+           GameState.GAME_OVER:
+               show_game_over()
+   ```
+
+4. Create User Interface:
+
+   a. Start Menu:
+
+   ```gdscript
+   func show_menu():
+       $MenuContainer.show()
+       $GameContainer.hide()
+       $GameOverContainer.hide()
+
+   func _on_start_button_pressed():
+       set_state(GameState.PLAYING)
+   ```
+
+   b. In-game UI:
+
+   ```gdscript
+   func update_score_display():
+       score_label.text = str(pong_service.player_score) + " - " + str(pong_service.ai_score)
+   ```
+
+   c. Game Over Screen:
+
+   ```gdscript
+   func show_game_over():
+       $GameOverContainer.show()
+       $GameContainer.hide()
+       $FinalScoreLabel.text = "Final Score: " + str(pong_service.player_score)
+       $HighScoreLabel.text = "High Score: " + str(pong_service.get_high_score())
+
+   func _on_play_again_button_pressed():
+       set_state(GameState.PLAYING)
+   ```
+
+5. Add Sound Effects:
+
+   a. Create an AudioManager:
+
+   ```gdscript
+   class_name AudioManager
+   extends Node
+
+   var paddle_hit_sound: AudioStream = preload("res://assets/sounds/paddle_hit.wav")
+   var wall_hit_sound: AudioStream = preload("res://assets/sounds/wall_hit.wav")
+   var score_sound: AudioStream = preload("res://assets/sounds/score.wav")
+
+   func play_paddle_hit():
+       $PaddleHitPlayer.stream = paddle_hit_sound
+       $PaddleHitPlayer.play()
+
+   func play_wall_hit():
+       $WallHitPlayer.stream = wall_hit_sound
+       $WallHitPlayer.play()
+
+   func play_score():
+       $ScorePlayer.stream = score_sound
+       $ScorePlayer.play()
+   ```
+
+   b. Integrate AudioManager with PongService:
+
+   ```gdscript
+   var audio_manager: AudioManager
+
+   func _init(p_pong_repo: PongRepository, p_audio_manager: AudioManager):
+       pong_repository = p_pong_repo
+       audio_manager = p_audio_manager
+
+   func update_ball_position(delta: float, ball: Ball, player_paddle: Paddle, ai_paddle: Paddle) -> void:
+       # ... existing code ...
+       if ball.overlaps_body(player_paddle) or ball.overlaps_body(ai_paddle):
+           audio_manager.play_paddle_hit()
+       # ... rest of the code ...
+   ```
+
+6. Final Integration:
+
+   a. Update PongController to use all new components:
+
+   ```gdscript
+   func _ready():
+       pong_service.connect("score_updated", self, "_on_score_updated")
+       pong_service.connect("game_over", self, "_on_game_over")
+       set_state(GameState.MENU)
+
+   func _process(delta):
+       if current_state == GameState.PLAYING:
+           handle_input(delta)
+           pong_service.update_ai_paddle(ball.position, ai_paddle, delta)
+           pong_service.update_ball_position(delta, ball, player_paddle, ai_paddle)
+
+   func handle_input(delta):
+       if Input.is_action_pressed("move_up"):
+           player_paddle.move_up(delta)
+       if Input.is_action_pressed("move_down"):
+           player_paddle.move_down(delta)
+   ```
+
+   b. Ensure all signals are connected and UI elements are updated appropriately.
+
+By following these steps, you'll have a complete, functioning Pong game that adheres to the feature-based architecture. This structure allows for easy expansion, such as adding power-ups, different AI difficulties, or even networked multiplayer in the future.
+
+Remember to create appropriate scenes in Godot, connecting the script instances and setting up th
+
+### Pong Architecture Diagram
+
+```mermaid
+classDiagram
+    class PongController {
+        -pong_service: PongService
+        -player_paddle: Paddle
+        -ai_paddle: Paddle
+        -ball: Ball
+        -score_label: Label
+        -high_score_label: Label
+        -current_state: GameState
+        +_ready()
+        +_process(delta)
+        +start_new_game()
+        +show_menu()
+        +show_game_over()
+        +handle_input(delta)
+    }
+
+    class PongService {
+        -pong_repository: PongRepository
+        -audio_manager: AudioManager
+        +start_new_game()
+        +update_score(is_player_point: bool)
+        +end_game()
+        +get_high_score(): int
+        +get_player_score(): int
+        +get_ai_score(): int
+        +update_ball_position(delta, ball, player_paddle, ai_paddle)
+        +update_ai_paddle(ball_position, ai_paddle, delta)
+    }
+
+    class PongRepository {
+        -_data_store: PongDataStore
+        -_high_score: int
+        -_player_score: int
+        -_ai_score: int
+        -_is_cache_valid: bool
+        +load_high_score()
+        +get_high_score(): int
+        +update_high_score(score: int)
+        +get_player_score(): int
+        +get_ai_score(): int
+        +update_player_score(score: int)
+        +update_ai_score(score: int)
+        +reset_scores()
+        +persist()
+    }
+
+    class PongDataStore {
+        +high_score: int
+        +version: int
+        +load_or_create(): PongDataStore
+        +save()
+        -_migrate_store_if_necessary()
+    }
+
+    class Ball {
+        +speed: float
+        +direction: Vector2
+        +reset_ball()
+        +_process(delta)
+    }
+
+    class Paddle {
+        +speed: float
+        +move_up(delta: float)
+        +move_down(delta: float)
+    }
+
+    class AudioManager {
+        +play_paddle_hit()
+        +play_wall_hit()
+        +play_score()
+    }
+
+    PongController --> PongService : uses
+    PongController --> Ball : manages
+    PongController --> Paddle : manages
+    PongService --> PongRepository : uses
+    PongService --> AudioManager : uses
+    PongRepository --> PongDataStore : uses
+    PongController ..> Paddle : creates
+    PongController ..> Ball : creates
+```
+
 ## 13. Conclusion
 
 This feature-based architecture provides a robust foundation for complex game development projects. By adhering to these principles and guidelines, developers can create maintainable, scalable, and efficient game systems. Remember that this architecture is a guideline and should be adapted as necessary to meet the specific needs of each project.
