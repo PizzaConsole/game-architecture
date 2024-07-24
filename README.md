@@ -146,50 +146,82 @@ This section provides concrete examples of how our feature-based architecture ca
 
 The Quest System manages available quests, tracks progress, and handles completion.
 
-#### QuestDataStore
+#### QuestController
 
 ```gdscript
-class_name QuestDataStore
-extends Resource
+extends Control
 
-const SAVE_PATH = "user://data/quests.tres"
-const CURRENT_VERSION = 1
+@onready var quest_list = $QuestList
+@onready var accept_button = $AcceptButton
 
-@export var quests: Dictionary = {}
-@export var active_quests: Dictionary = {}
-@export var version: int = CURRENT_VERSION
+var quest_service: QuestService
 
-static func load_or_create() -> QuestDataStore:
-    if FileAccess.file_exists(SAVE_PATH):
-        var store: QuestDataStore = ResourceLoader.load(SAVE_PATH) as QuestDataStore
-        if store:
-            store._migrate_store_if_necessary()
-            return store
+func _init(q_quest_service: QuestService):
+    quest_service = q_quest_service
 
-    var new_store: QuestDataStore = QuestDataStore.new()
-    new_store.save()
-    return new_store
+func _ready():
+    accept_button.connect("pressed", self, "_on_accept_button_pressed")
+    quest_service.connect("active_quests_changed", self, "_on_active_quests_changed")
+    update_quest_list()
 
-func save() -> void:
-    ResourceSaver.save(self, SAVE_PATH)
+func _on_accept_button_pressed():
+    var selected_quest = quest_list.get_selected_quest()
+    if selected_quest:
+        var success = quest_service.accept_quest(selected_quest)
+        if success:
+            update_quest_list()
 
-func clear() -> void:
-    quests.clear()
-    active_quests.clear()
-    save()
+func _on_active_quests_changed(active_quests):
+    update_quest_list()
 
-func _migrate_store_if_necessary() -> void:
-    if version < CURRENT_VERSION:
-        match version:
-            1:
-                _migrate_store_to_v2()
+func update_quest_list():
+    var quests = quest_service.get_all_quests()
+    quest_list.update_quests(quests)
+```
 
-        version = CURRENT_VERSION
-        save()
+#### QuestService
 
-func _migrate_store_to_v2() -> void:
-    # Example: Perform store-wide migration
-    print("Migrated QuestDataStore to version 2")
+```gdscript
+class_name QuestService
+extends Node
+
+signal quest_updated(quest: Quest)
+signal active_quests_changed(active_quests: Array[Quest])
+
+var quest_repository: QuestRepository
+var player_service: PlayerService
+
+func _init(q_quest_repo: QuestRepository, p_player_service: PlayerService) -> void:
+    quest_repository = q_quest_repo
+    player_service = p_player_service
+
+func get_quest(quest_id: String) -> Quest:
+    return quest_repository.fetch_by_id(quest_id)
+
+func get_all_quests() -> Array[Quest]:
+    return quest_repository.fetch_all()
+
+func get_active_quests() -> Array[Quest]:
+    return quest_repository.fetch_active_quests()
+
+func accept_quest(quest: Quest) -> bool:
+    if player_service.can_accept_quest(quest):
+        quest_repository.add_active_quest(quest)
+        active_quests_changed.emit(get_active_quests())
+        save_changes()
+        return true
+    return false
+
+func complete_quest(quest: Quest) -> void:
+    quest_repository.remove_active_quest(quest.id)
+    player_service.add_experience(quest.reward_experience)
+    player_service.add_money(quest.reward_money)
+    active_quests_changed.emit(get_active_quests())
+    quest_updated.emit(quest)
+    save_changes()
+
+func save_changes() -> void:
+    quest_repository.persist()
 ```
 
 #### QuestRepository
@@ -243,82 +275,50 @@ func persist() -> void:
     _data_store.save()
 ```
 
-#### QuestService
+#### QuestDataStore
 
 ```gdscript
-class_name QuestService
-extends Node
+class_name QuestDataStore
+extends Resource
 
-signal quest_updated(quest: Quest)
-signal active_quests_changed(active_quests: Array[Quest])
+const SAVE_PATH = "user://data/quests.tres"
+const CURRENT_VERSION = 1
 
-var quest_repository: QuestRepository
-var player_service: PlayerService
+@export var quests: Dictionary = {}
+@export var active_quests: Dictionary = {}
+@export var version: int = CURRENT_VERSION
 
-func _init(q_quest_repo: QuestRepository, p_player_service: PlayerService) -> void:
-    quest_repository = q_quest_repo
-    player_service = p_player_service
+static func load_or_create() -> QuestDataStore:
+    if FileAccess.file_exists(SAVE_PATH):
+        var store: QuestDataStore = ResourceLoader.load(SAVE_PATH) as QuestDataStore
+        if store:
+            store._migrate_store_if_necessary()
+            return store
 
-func get_quest(quest_id: String) -> Quest:
-    return quest_repository.fetch_by_id(quest_id)
+    var new_store: QuestDataStore = QuestDataStore.new()
+    new_store.save()
+    return new_store
 
-func get_all_quests() -> Array[Quest]:
-    return quest_repository.fetch_all()
+func save() -> void:
+    ResourceSaver.save(self, SAVE_PATH)
 
-func get_active_quests() -> Array[Quest]:
-    return quest_repository.fetch_active_quests()
+func clear() -> void:
+    quests.clear()
+    active_quests.clear()
+    save()
 
-func accept_quest(quest: Quest) -> bool:
-    if player_service.can_accept_quest(quest):
-        quest_repository.add_active_quest(quest)
-        active_quests_changed.emit(get_active_quests())
-        save_changes()
-        return true
-    return false
+func _migrate_store_if_necessary() -> void:
+    if version < CURRENT_VERSION:
+        match version:
+            1:
+                _migrate_store_to_v2()
 
-func complete_quest(quest: Quest) -> void:
-    quest_repository.remove_active_quest(quest.id)
-    player_service.add_experience(quest.reward_experience)
-    player_service.add_money(quest.reward_money)
-    active_quests_changed.emit(get_active_quests())
-    quest_updated.emit(quest)
-    save_changes()
+        version = CURRENT_VERSION
+        save()
 
-func save_changes() -> void:
-    quest_repository.persist()
-```
-
-#### QuestController
-
-```gdscript
-extends Control
-
-@onready var quest_list = $QuestList
-@onready var accept_button = $AcceptButton
-
-var quest_service: QuestService
-
-func _init(q_quest_service: QuestService):
-    quest_service = q_quest_service
-
-func _ready():
-    accept_button.connect("pressed", self, "_on_accept_button_pressed")
-    quest_service.connect("active_quests_changed", self, "_on_active_quests_changed")
-    update_quest_list()
-
-func _on_accept_button_pressed():
-    var selected_quest = quest_list.get_selected_quest()
-    if selected_quest:
-        var success = quest_service.accept_quest(selected_quest)
-        if success:
-            update_quest_list()
-
-func _on_active_quests_changed(active_quests):
-    update_quest_list()
-
-func update_quest_list():
-    var quests = quest_service.get_all_quests()
-    quest_list.update_quests(quests)
+func _migrate_store_to_v2() -> void:
+    # Example: Perform store-wide migration
+    print("Migrated QuestDataStore to version 2")
 ```
 
 ### 12.2 Inventory System
@@ -369,6 +369,76 @@ func _migrate_store_to_v2() -> void:
     print("Migrated InventoryDataStore to version 2")
 ```
 
+#### InventoryController
+
+```gdscript
+extends Control
+
+@onready var item_list = $ItemList
+@onready var use_button = $UseButton
+
+var inventory_service: InventoryService
+
+func _init(i_inventory_service: InventoryService):
+    inventory_service = i_inventory_service
+
+func _ready():
+    use_button.connect("pressed", self, "_on_use_button_pressed")
+    inventory_service.connect("inventory_updated", self, "_on_inventory_updated")
+    update_inventory_display()
+
+func _on_use_button_pressed():
+    var selected_item = item_list.get_selected_item()
+    if selected_item:
+        inventory_service.use_item(selected_item)
+
+func _on_inventory_updated(items):
+    update_inventory_display()
+
+func update_inventory_display():
+    var items = inventory_service.get_all_items()
+    item_list.clear()
+    for item in items:
+        item_list.add_item(item.name, item.icon)
+```
+
+#### InventoryService
+
+```gdscript
+class_name InventoryService
+extends Node
+
+signal inventory_updated(items: Array[Item])
+
+var inventory_repository: InventoryRepository
+var player_service: PlayerService
+
+func _init(i_inventory_repo: InventoryRepository, p_player_service: PlayerService) -> void:
+    inventory_repository = i_inventory_repo
+    player_service = p_player_service
+
+func add_item(item: Item) -> void:
+    inventory_repository.add(item)
+    inventory_updated.emit(get_all_items())
+    save_changes()
+
+func remove_item(item_id: String) -> void:
+    inventory_repository.remove(item_id)
+    inventory_updated.emit(get_all_items())
+    save_changes()
+
+func use_item(item: Item) -> void:
+    if item.can_be_used():
+        player_service.apply_item_effect(item)
+        remove_item(item.id)
+
+func get_all_items() -> Array[Item]:
+    return inventory_repository.fetch_all()
+
+func save_changes() -> void:
+    inventory_repository.persist()
+```
+
 #### InventoryRepository
 
 ```gdscript
@@ -410,156 +480,45 @@ func persist() -> void:
     _data_store.save()
 ```
 
-#### InventoryService
-
-```gdscript
-class_name InventoryService
-extends Node
-
-signal inventory_updated(items: Array[Item])
-
-var inventory_repository: InventoryRepository
-var player_service: PlayerService
-
-func _init(i_inventory_repo: InventoryRepository, p_player_service: PlayerService) -> void:
-    inventory_repository = i_inventory_repo
-    player_service = p_player_service
-
-func add_item(item: Item) -> void:
-    inventory_repository.add(item)
-    inventory_updated.emit(get_all_items())
-    save_changes()
-
-func remove_item(item_id: String) -> void:
-    inventory_repository.remove(item_id)
-    inventory_updated.emit(get_all_items())
-    save_changes()
-
-func use_item(item: Item) -> void:
-    if item.can_be_used():
-        player_service.apply_item_effect(item)
-        remove_item(item.id)
-
-func get_all_items() -> Array[Item]:
-    return inventory_repository.fetch_all()
-
-func save_changes() -> void:
-    inventory_repository.persist()
-```
-
-#### InventoryController
-
-```gdscript
-extends Control
-
-@onready var item_list = $ItemList
-@onready var use_button = $UseButton
-
-var inventory_service: InventoryService
-
-func _init(i_inventory_service: InventoryService):
-    inventory_service = i_inventory_service
-
-func _ready():
-    use_button.connect("pressed", self, "_on_use_button_pressed")
-    inventory_service.connect("inventory_updated", self, "_on_inventory_updated")
-    update_inventory_display()
-
-func _on_use_button_pressed():
-    var selected_item = item_list.get_selected_item()
-    if selected_item:
-        inventory_service.use_item(selected_item)
-
-func _on_inventory_updated(items):
-    update_inventory_display()
-
-func update_inventory_display():
-    var items = inventory_service.get_all_items()
-    item_list.clear()
-    for item in items:
-        item_list.add_item(item.name, item.icon)
-```
-
 ### 12.3 Crafting System
 
 The Crafting System allows players to combine items to create new ones.
 
-#### CraftingDataStore
+#### CraftingController
 
 ```gdscript
-class_name CraftingDataStore
-extends Resource
+extends Control
 
-const SAVE_PATH = "user://data/crafting.tres"
-const CURRENT_VERSION = 1
+@onready var recipe_list = $RecipeList
+@onready var craft_button = $CraftButton
 
-@export var recipes: Dictionary = {}
-@export var version: int = CURRENT_VERSION
+var crafting_service: CraftingService
 
-static func load_or_create() -> CraftingDataStore:
-    if FileAccess.file_exists(SAVE_PATH):
-        var store: CraftingDataStore = ResourceLoader.load(SAVE_PATH) as CraftingDataStore
-        if store:
-            store._migrate_store_if_necessary()
-            return store
+func _init(c_crafting_service: CraftingService):
+    crafting_service = c_crafting_service
 
-    var new_store: CraftingDataStore = CraftingDataStore.new()
-    new_store.save()
-    return new_store
+func _ready():
+    craft_button.connect("pressed", self, "_on_craft_button_pressed")
+    crafting_service.connect("crafting_result", self, "_on_crafting_result")
+    update_recipe_list()
 
-func save() -> void:
-    ResourceSaver.save(self, SAVE_PATH)
+func _on_craft_button_pressed():
+    var selected_recipe = recipe_list.get_selected_recipe()
+    if selected_recipe:
+        crafting_service.craft_item(selected_recipe)
 
-func clear() -> void:
-    recipes.clear()
-    save()
+func _on_crafting_result(result):
+    if result.success:
+        update_recipe_list()
+        # Show success message to the player
+    else:
+        # Show failure message to the player
 
-func _migrate_store_if_necessary() -> void:
-    if version < CURRENT_VERSION:
-        match version:
-            1:
-                _migrate_store_to_v2()
-
-        version = CURRENT_VERSION
-        save()
-
-func _migrate_store_to_v2() -> void:
-    # Example: Perform store-wide migration
-    print("Migrated CraftingDataStore to version 2")
-```
-
-#### CraftingRepository
-
-```gdscript
-class_name CraftingRepository
-extends Node
-
-var _data_store: CraftingDataStore
-var _cache: Dictionary = {}
-var _is_cache_valid: bool = false
-
-func _init(data_store: CraftingDataStore) -> void:
-    _data_store = data_store
-
-func load_all() -> void:
-    _cache = _data_store.recipes.duplicate(true)
-    _is_cache_valid = true
-
-func fetch_by_id(recipe_id: String) -> Recipe:
-    if not _is_cache_valid:
-        load_all()
-    return _cache.get(recipe_id)
-
-func fetch_all() -> Array[Recipe]:
-    if not _is_cache_valid:
-        load_all()
-    var all: Array[Recipe] = []
-    all.append_array(_cache.values())
-    return all
-
-func persist() -> void:
-    _data_store.recipes = _cache.duplicate(true)
-    _data_store.save()
+func update_recipe_list():
+    var recipes = crafting_service.get_available_recipes()
+    recipe_list.clear()
+    for recipe in recipes:
+        recipe_list.add_item(recipe.name, recipe.icon)
 ```
 
 #### CraftingService
@@ -609,41 +568,82 @@ func create_item(recipe: Recipe) -> Item:
     return new_item
 ```
 
-#### CraftingController
+#### CraftingRepository
 
 ```gdscript
-extends Control
+class_name CraftingRepository
+extends Node
 
-@onready var recipe_list = $RecipeList
-@onready var craft_button = $CraftButton
+var _data_store: CraftingDataStore
+var _cache: Dictionary = {}
+var _is_cache_valid: bool = false
 
-var crafting_service: CraftingService
+func _init(data_store: CraftingDataStore) -> void:
+    _data_store = data_store
 
-func _init(c_crafting_service: CraftingService):
-    crafting_service = c_crafting_service
+func load_all() -> void:
+    _cache = _data_store.recipes.duplicate(true)
+    _is_cache_valid = true
 
-func _ready():
-    craft_button.connect("pressed", self, "_on_craft_button_pressed")
-    crafting_service.connect("crafting_result", self, "_on_crafting_result")
-    update_recipe_list()
+func fetch_by_id(recipe_id: String) -> Recipe:
+    if not _is_cache_valid:
+        load_all()
+    return _cache.get(recipe_id)
 
-func _on_craft_button_pressed():
-    var selected_recipe = recipe_list.get_selected_recipe()
-    if selected_recipe:
-        crafting_service.craft_item(selected_recipe)
+func fetch_all() -> Array[Recipe]:
+    if not _is_cache_valid:
+        load_all()
+    var all: Array[Recipe] = []
+    all.append_array(_cache.values())
+    return all
 
-func _on_crafting_result(result):
-    if result.success:
-        update_recipe_list()
-        # Show success message to the player
-    else:
-        # Show failure message to the player
+func persist() -> void:
+    _data_store.recipes = _cache.duplicate(true)
+    _data_store.save()
+```
 
-func update_recipe_list():
-    var recipes = crafting_service.get_available_recipes()
-    recipe_list.clear()
-    for recipe in recipes:
-        recipe_list.add_item(recipe.name, recipe.icon)
+#### CraftingDataStore
+
+```gdscript
+class_name CraftingDataStore
+extends Resource
+
+const SAVE_PATH = "user://data/crafting.tres"
+const CURRENT_VERSION = 1
+
+@export var recipes: Dictionary = {}
+@export var version: int = CURRENT_VERSION
+
+static func load_or_create() -> CraftingDataStore:
+    if FileAccess.file_exists(SAVE_PATH):
+        var store: CraftingDataStore = ResourceLoader.load(SAVE_PATH) as CraftingDataStore
+        if store:
+            store._migrate_store_if_necessary()
+            return store
+
+    var new_store: CraftingDataStore = CraftingDataStore.new()
+    new_store.save()
+    return new_store
+
+func save() -> void:
+    ResourceSaver.save(self, SAVE_PATH)
+
+func clear() -> void:
+    recipes.clear()
+    save()
+
+func _migrate_store_if_necessary() -> void:
+    if version < CURRENT_VERSION:
+        match version:
+            1:
+                _migrate_store_to_v2()
+
+        version = CURRENT_VERSION
+        save()
+
+func _migrate_store_to_v2() -> void:
+    # Example: Perform store-wide migration
+    print("Migrated CraftingDataStore to version 2")
 ```
 
 These examples demonstrate how our feature-based architecture promotes:
